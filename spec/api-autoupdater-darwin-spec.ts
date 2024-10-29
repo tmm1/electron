@@ -1,7 +1,7 @@
 import { autoUpdater, systemPreferences } from 'electron';
 
 import { expect } from 'chai';
-import * as express from 'express';
+import fastify, { FastifyInstance, FastifyRequest } from 'fastify';
 import * as psList from 'ps-list';
 import * as uuid from 'uuid';
 
@@ -122,19 +122,26 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
 
   describe('with update server', () => {
     let port = 0;
-    let server: express.Application = null as any;
+    let server: FastifyInstance = null as any;
     let httpServer: http.Server = null as any;
-    let requests: express.Request[] = [];
+    let requests: FastifyRequest[] = [];
 
     beforeEach((done) => {
       requests = [];
-      server = express();
-      server.use((req, res, next) => {
-        requests.push(req);
-        next();
+      server = fastify();
+
+      server.addHook('onRequest', (request, reply, done) => {
+        requests.push(request);
+        done();
       });
-      httpServer = server.listen(0, '127.0.0.1', () => {
-        port = (httpServer.address() as AddressInfo).port;
+
+      server.listen({ port: 0, host: '127.0.0.1' }, (err) => {
+        if (err) {
+          done(err);
+          return;
+        }
+        port = (server.server.address() as AddressInfo).port;
+        httpServer = server.server;
         done();
       });
     });
@@ -163,7 +170,7 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(launchResult.code).to.equal(0);
           expect(requests).to.have.lengthOf(1);
           expect(requests[0]).to.have.property('url', '/update-check');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -180,7 +187,7 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(launchResult.code).to.equal(0);
           expect(requests).to.have.lengthOf(1);
           expect(requests[0]).to.have.property('url', '/update-check');
-          expect(requests[0].header('x-test')).to.equal('this-is-a-test');
+          expect(requests[0].headers['x-test']).to.equal('this-is-a-test');
         });
       });
     });
@@ -193,7 +200,7 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           res.status(500).send('This is not a file');
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -207,8 +214,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -243,10 +250,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         endFixture: 'update'
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -266,14 +278,14 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
 
         await relaunchPromise;
         expect(requests).to.have.lengthOf(3);
         expect(requests[2].url).to.equal('/update-check/updated/2.0.0');
-        expect(requests[2].header('user-agent')).to.include('Electron/');
+        expect(requests[2].headers['user-agent']).to.include('Electron/');
       });
     });
 
@@ -290,11 +302,17 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         }, async (_, updateZipPath3) => {
           let updateCount = 0;
           server.get('/update-file', (req, res) => {
-            res.download(updateCount > 1 ? updateZipPath3 : updateZipPath2);
+            const zp = updateCount > 1 ? updateZipPath3 : updateZipPath2;
+            const stream = fs.createReadStream(zp);
+            res.header(
+              'Content-Disposition',
+              `attachment; filename=${path.basename(zp)}`
+            );
+            res.send(stream).type('application/zip').code(200);
           });
           server.get('/update-check', (req, res) => {
             updateCount++;
-            res.json({
+            res.send({
               url: `http://localhost:${port}/update-file`,
               name: 'My Release Name',
               notes: 'Theses are some release notes innit',
@@ -314,18 +332,18 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
             expect(requests).to.have.lengthOf(4);
             expect(requests[0]).to.have.property('url', '/update-check');
             expect(requests[1]).to.have.property('url', '/update-file');
-            expect(requests[0].header('user-agent')).to.include('Electron/');
-            expect(requests[1].header('user-agent')).to.include('Electron/');
+            expect(requests[0].headers['user-agent']).to.include('Electron/');
+            expect(requests[1].headers['user-agent']).to.include('Electron/');
             expect(requests[2]).to.have.property('url', '/update-check');
             expect(requests[3]).to.have.property('url', '/update-file');
-            expect(requests[2].header('user-agent')).to.include('Electron/');
-            expect(requests[3].header('user-agent')).to.include('Electron/');
+            expect(requests[2].headers['user-agent']).to.include('Electron/');
+            expect(requests[3].headers['user-agent']).to.include('Electron/');
           });
 
           await relaunchPromise;
           expect(requests).to.have.lengthOf(5);
           expect(requests[4].url).to.equal('/update-check/updated/3.0.0');
-          expect(requests[4].header('user-agent')).to.include('Electron/');
+          expect(requests[4].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -337,10 +355,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         endFixture: 'update'
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -360,14 +383,14 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
 
         await relaunchPromise;
         expect(requests).to.have.lengthOf(3);
         expect(requests[2].url).to.equal('/update-check/updated/0.0.1');
-        expect(requests[2].header('user-agent')).to.include('Electron/');
+        expect(requests[2].headers['user-agent']).to.include('Electron/');
       });
     });
 
@@ -389,10 +412,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           }
         }, async (appPath, updateZipPath) => {
           server.get('/update-file', (req, res) => {
-            res.download(updateZipPath);
+            const stream = fs.createReadStream(updateZipPath);
+            res.header(
+              'Content-Disposition',
+              `attachment; filename=${path.basename(updateZipPath)}`
+            );
+            res.send(stream).type('application/zip').code(200);
           });
           server.get('/update-check', (req, res) => {
-            res.json({
+            res.send({
               url: `http://localhost:${port}/update-file`,
               name: 'My Release Name',
               notes: 'Theses are some release notes innit',
@@ -406,8 +434,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
             expect(requests).to.have.lengthOf(2);
             expect(requests[0]).to.have.property('url', '/update-check');
             expect(requests[1]).to.have.property('url', '/update-file');
-            expect(requests[0].header('user-agent')).to.include('Electron/');
-            expect(requests[1].header('user-agent')).to.include('Electron/');
+            expect(requests[0].headers['user-agent']).to.include('Electron/');
+            expect(requests[1].headers['user-agent']).to.include('Electron/');
           });
         });
       });
@@ -429,10 +457,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           }
         }, async (appPath, updateZipPath) => {
           server.get('/update-file', (req, res) => {
-            res.download(updateZipPath);
+            const stream = fs.createReadStream(updateZipPath);
+            res.header(
+              'Content-Disposition',
+              `attachment; filename=${path.basename(updateZipPath)}`
+            );
+            res.send(stream).type('application/zip').code(200);
           });
           server.get('/update-check', (req, res) => {
-            res.json({
+            res.send({
               url: `http://localhost:${port}/update-file`,
               name: 'My Release Name',
               notes: 'Theses are some release notes innit',
@@ -446,8 +479,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
             expect(requests).to.have.lengthOf(2);
             expect(requests[0]).to.have.property('url', '/update-check');
             expect(requests[1]).to.have.property('url', '/update-file');
-            expect(requests[0].header('user-agent')).to.include('Electron/');
-            expect(requests[1].header('user-agent')).to.include('Electron/');
+            expect(requests[0].headers['user-agent']).to.include('Electron/');
+            expect(requests[1].headers['user-agent']).to.include('Electron/');
           });
         });
       });
@@ -459,10 +492,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           endFixture: 'update'
         }, async (appPath, updateZipPath) => {
           server.get('/update-file', (req, res) => {
-            res.download(updateZipPath);
+            const stream = fs.createReadStream(updateZipPath);
+            res.header(
+              'Content-Disposition',
+              `attachment; filename=${path.basename(updateZipPath)}`
+            );
+            res.send(stream).type('application/zip').code(200);
           });
           server.get('/update-check', (req, res) => {
-            res.json({
+            res.send({
               url: `http://localhost:${port}/update-file`,
               name: 'My Release Name',
               notes: 'Theses are some release notes innit',
@@ -482,14 +520,14 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
             expect(requests).to.have.lengthOf(2);
             expect(requests[0]).to.have.property('url', '/update-check');
             expect(requests[1]).to.have.property('url', '/update-file');
-            expect(requests[0].header('user-agent')).to.include('Electron/');
-            expect(requests[1].header('user-agent')).to.include('Electron/');
+            expect(requests[0].headers['user-agent']).to.include('Electron/');
+            expect(requests[1].headers['user-agent']).to.include('Electron/');
           });
 
           await relaunchPromise;
           expect(requests).to.have.lengthOf(3);
           expect(requests[2].url).to.equal('/update-check/updated/1.0.1');
-          expect(requests[2].header('user-agent')).to.include('Electron/');
+          expect(requests[2].headers['user-agent']).to.include('Electron/');
         });
       });
 
@@ -509,10 +547,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         endFixture: 'update'
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -555,8 +598,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
 
         await shipItFlipFlopPromise;
@@ -588,10 +631,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           const randomID = uuid.v4();
           cp.spawnSync('xattr', ['-w', 'spec-id', randomID, appPath]);
           server.get('/update-file', (req, res) => {
-            res.download(updateZipPath);
+            const stream = fs.createReadStream(updateZipPath);
+            res.header(
+              'Content-Disposition',
+              `attachment; filename=${path.basename(updateZipPath)}`
+            );
+            res.send(stream).type('application/zip').code(200);
           });
           server.get('/update-check', (req, res) => {
-            res.json({
+            res.send({
               url: `http://localhost:${port}/update-file`,
               name: 'My Release Name',
               notes: 'Theses are some release notes innit',
@@ -611,14 +659,14 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
             expect(requests).to.have.lengthOf(2);
             expect(requests[0]).to.have.property('url', '/update-check');
             expect(requests[1]).to.have.property('url', '/update-file');
-            expect(requests[0].header('user-agent')).to.include('Electron/');
-            expect(requests[1].header('user-agent')).to.include('Electron/');
+            expect(requests[0].headers['user-agent']).to.include('Electron/');
+            expect(requests[1].headers['user-agent']).to.include('Electron/');
           });
 
           await relaunchPromise;
           expect(requests).to.have.lengthOf(3);
           expect(requests[2].url).to.equal('/update-check/updated/2.0.0');
-          expect(requests[2].header('user-agent')).to.include('Electron/');
+          expect(requests[2].headers['user-agent']).to.include('Electron/');
           const result = cp.spawnSync('xattr', ['-l', appPath]);
           expect(result.stdout.toString()).to.include(`spec-id: ${randomID}`);
         });
@@ -639,10 +687,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         }
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -657,8 +710,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -678,10 +731,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         }
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -696,8 +754,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -716,10 +774,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         }
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             url: `http://localhost:${port}/update-file`,
             name: 'My Release Name',
             notes: 'Theses are some release notes innit',
@@ -734,8 +797,8 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
       });
     });
@@ -747,10 +810,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         endFixture: 'update-json'
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             currentRelease: '2.0.0',
             releases: [
               {
@@ -779,14 +847,14 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(requests).to.have.lengthOf(2);
           expect(requests[0]).to.have.property('url', '/update-check');
           expect(requests[1]).to.have.property('url', '/update-file');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
-          expect(requests[1].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
+          expect(requests[1].headers['user-agent']).to.include('Electron/');
         });
 
         await relaunchPromise;
         expect(requests).to.have.lengthOf(3);
         expect(requests[2]).to.have.property('url', '/update-check/updated/2.0.0');
-        expect(requests[2].header('user-agent')).to.include('Electron/');
+        expect(requests[2].headers['user-agent']).to.include('Electron/');
       });
     });
 
@@ -797,10 +865,15 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
         endFixture: 'update-json'
       }, async (appPath, updateZipPath) => {
         server.get('/update-file', (req, res) => {
-          res.download(updateZipPath);
+          const stream = fs.createReadStream(updateZipPath);
+          res.header(
+            'Content-Disposition',
+            `attachment; filename=${path.basename(updateZipPath)}`
+          );
+          res.send(stream).type('application/zip').code(200);
         });
         server.get('/update-check', (req, res) => {
-          res.json({
+          res.send({
             currentRelease: '0.1.0',
             releases: [
               {
@@ -822,7 +895,7 @@ ifdescribe(shouldRunCodesignTests)('autoUpdater behavior', function () {
           expect(launchResult.out).to.include('No update available');
           expect(requests).to.have.lengthOf(1);
           expect(requests[0]).to.have.property('url', '/update-check');
-          expect(requests[0].header('user-agent')).to.include('Electron/');
+          expect(requests[0].headers['user-agent']).to.include('Electron/');
         });
       });
     });
