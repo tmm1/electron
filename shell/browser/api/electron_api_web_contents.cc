@@ -1003,6 +1003,11 @@ WebContents::~WebContents() {
       host->GetWidget()->RemoveInputEventObserver(this);
   }
 
+  if (browser_context_) {
+    if (auto* download_manager = browser_context_->GetDownloadManager())
+      download_manager->Shutdown();
+  }
+
   if (!inspectable_web_contents_) {
     WebContentsDestroyed();
     return;

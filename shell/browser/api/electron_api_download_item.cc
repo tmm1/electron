@@ -94,6 +94,11 @@ DownloadItem::~DownloadItem() {
   }
 }
 
+void DownloadItem::ClearDownloadItem() {
+  LOG(INFO) << "DownloadItem::ClearDownloadItem()";
+  OnDownloadDestroyed(nullptr);
+}
+
 bool DownloadItem::CheckAlive() const {
   if (!download_item_) {
     gin_helper::ErrorThrower(isolate_).ThrowError(
@@ -115,6 +120,7 @@ void DownloadItem::OnDownloadUpdated(download::DownloadItem* item) {
 }
 
 void DownloadItem::OnDownloadDestroyed(download::DownloadItem* /*item*/) {
+  download_item_->RemoveObserver(this);
   download_item_ = nullptr;
   Unpin();
 }

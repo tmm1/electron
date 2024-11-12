@@ -269,7 +269,7 @@ void ElectronDownloadManagerDelegate::OnDownloadPathGenerated(
     gin_helper::Promise<gin_helper::Dictionary> dialog_promise(isolate);
     auto dialog_callback = base::BindOnce(
         &ElectronDownloadManagerDelegate::OnDownloadSaveDialogDone,
-        base::Unretained(this), download_id, std::move(callback));
+        base::Unretained(this), download_guid, std::move(callback));
 
     std::ignore = dialog_promise.Then(std::move(dialog_callback));
     file_dialog::ShowSaveDialog(settings, std::move(dialog_promise));
@@ -385,6 +385,14 @@ void ElectronDownloadManagerDelegate::GetNextId(
     content::DownloadIdCallback callback) {
   static uint32_t next_id = download::DownloadItem::kInvalidId + 1;
   std::move(callback).Run(next_id++);
+}
+
+void ElectronDownloadManagerDelegate::OnDownloadCanceledAtShutdown(
+    download::DownloadItem* download) {
+  LOG(INFO) << "DownloadItem::OnDownloadCanceledAtShutdown()";
+  api::DownloadItem* item = api::DownloadItem::FromDownloadItem(download);
+  if (item)
+    item->ClearDownloadItem();
 }
 
 }  // namespace electron

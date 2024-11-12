@@ -41,6 +41,8 @@ class DownloadItem final : public gin::Wrappable<DownloadItem>,
       v8::Isolate* isolate) override;
   const char* GetTypeName() override;
 
+  void ClearDownloadItem();
+
   // JS API, but also C++ calls it sometimes
   void SetSavePath(const base::FilePath& path);
   base::FilePath GetSavePath() const;

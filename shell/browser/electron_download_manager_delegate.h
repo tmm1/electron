@@ -7,6 +7,7 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "shell/browser/ui/file_dialog.h"
 
@@ -41,6 +42,7 @@ class ElectronDownloadManagerDelegate
       download::DownloadItem* download,
       content::DownloadOpenDelayedCallback callback) override;
   void GetNextId(content::DownloadIdCallback callback) override;
+  void OnDownloadCanceledAtShutdown(download::DownloadItem* download) override;
 
  private:
   // Get the save path set on the associated api::DownloadItem object
