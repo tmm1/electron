@@ -1,0 +1,137 @@
+From ffa47496a42729265488d36363057fa2aab8afa6 Mon Sep 17 00:00:00 2001
+From: Aman Karmani <aman@tmm1.net>
+Date: Sun, 17 Nov 2024 05:34:56 -0800
+Subject: [PATCH] src: enable perf maps and jit dumps on macOS
+
+---
+ src/diagnostics/perf-jit.cc  | 10 ++++++++--
+ src/diagnostics/perf-jit.h   |  4 ++--
+ src/flags/flag-definitions.h |  2 +-
+ src/logging/log.cc           |  8 ++++----
+ src/logging/log.h            |  2 +-
+ 5 files changed, 16 insertions(+), 10 deletions(-)
+
+diff --git a/src/diagnostics/perf-jit.cc b/src/diagnostics/perf-jit.cc
+index 8ae69ed40be..3788a9550cf 100644
+--- a/src/diagnostics/perf-jit.cc
++++ b/src/diagnostics/perf-jit.cc
+@@ -31,7 +31,7 @@
+ #include "src/flags/flags.h"
+ 
+ // Only compile the {LinuxPerfJitLogger} on Linux.
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+ 
+ #include <fcntl.h>
+ #include <sys/mman.h>
+@@ -153,8 +153,14 @@ void LinuxPerfJitLogger::OpenJitDumpFile() {
+   if (v8_flags.perf_prof_delete_file)
+     CHECK_EQ(0, unlink(perf_dump_name.begin()));
+ 
++#if V8_OS_DARWIN
++  // On macOS, samply uses a preload to find jitdumps and this mmap can be slow.
++  // https://bugzilla-dev.allizom.org/show_bug.cgi?id=1827214
++  marker_address_ = nullptr;
++#else
+   marker_address_ = OpenMarkerFile(fd);
+   if (marker_address_ == nullptr) return;
++#endif
+ 
+   perf_output_handle_ = fdopen(fd, "w+");
+   if (perf_output_handle_ == nullptr) return;
+@@ -556,4 +562,4 @@ void LinuxPerfJitLogger::LogWriteHeader() {
+ }  // namespace internal
+ }  // namespace v8
+ 
+-#endif  // V8_OS_LINUX
++#endif  // V8_OS_LINUX || V8_OS_DARWIN
+diff --git a/src/diagnostics/perf-jit.h b/src/diagnostics/perf-jit.h
+index 294c0cd32da..f16649c267e 100644
+--- a/src/diagnostics/perf-jit.h
++++ b/src/diagnostics/perf-jit.h
+@@ -31,7 +31,7 @@
+ #include "include/v8config.h"
+ 
+ // {LinuxPerfJitLogger} is only implemented on Linux.
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+ 
+ #include "src/logging/log.h"
+ 
+@@ -142,6 +142,6 @@ class LinuxPerfJitLogger : public CodeEventLogger {
+ }  // namespace internal
+ }  // namespace v8
+ 
+-#endif  // V8_OS_LINUX
++#endif  // V8_OS_LINUX || V8_OS_DARWIN
+ 
+ #endif  // V8_DIAGNOSTICS_PERF_JIT_H_
+diff --git a/src/flags/flag-definitions.h b/src/flags/flag-definitions.h
+index 470c596abed..1ee45e35ca2 100644
+--- a/src/flags/flag-definitions.h
++++ b/src/flags/flag-definitions.h
+@@ -2791,7 +2791,7 @@ DEFINE_IMPLICATION(prof, log_code)
+ 
+ DEFINE_BOOL(ll_prof, false, "Enable low-level linux profiler.")
+ 
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+ #define DEFINE_PERF_PROF_BOOL(nam, cmt) DEFINE_BOOL(nam, false, cmt)
+ #define DEFINE_PERF_PROF_IMPLICATION DEFINE_IMPLICATION
+ #else
+diff --git a/src/logging/log.cc b/src/logging/log.cc
+index f03fc0419e5..9fcc82ff45f 100644
+--- a/src/logging/log.cc
++++ b/src/logging/log.cc
+@@ -336,7 +336,7 @@ void CodeEventLogger::RegExpCodeCreateEvent(Handle<AbstractCode> code,
+ }
+ 
+ // Linux perf tool logging support.
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+ class LinuxPerfBasicLogger : public CodeEventLogger {
+  public:
+   explicit LinuxPerfBasicLogger(Isolate* isolate);
+@@ -462,7 +462,7 @@ void LinuxPerfBasicLogger::LogRecordedBuffer(const wasm::WasmCode* code,
+                          code->instructions().length(), name, length);
+ }
+ #endif  // V8_ENABLE_WEBASSEMBLY
+-#endif  // V8_OS_LINUX
++#endif  // V8_OS_LINUX || V8_OS_DARWIN
+ 
+ // External LogEventListener
+ ExternalLogEventListener::ExternalLogEventListener(Isolate* isolate)
+@@ -2229,7 +2229,7 @@ bool V8FileLogger::SetUp(Isolate* isolate) {
+   PrepareLogFileName(log_file_name, isolate, v8_flags.logfile);
+   log_file_ = std::make_unique<LogFile>(this, log_file_name.str());
+ 
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+   if (v8_flags.perf_basic_prof) {
+     perf_basic_logger_ = std::make_unique<LinuxPerfBasicLogger>(isolate);
+     CHECK(logger()->AddListener(perf_basic_logger_.get()));
+@@ -2374,7 +2374,7 @@ FILE* V8FileLogger::TearDownAndGetLogFile() {
+   ticker_.reset();
+   timer_.Stop();
+ 
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+   if (perf_basic_logger_) {
+     CHECK(logger()->RemoveListener(perf_basic_logger_.get()));
+     perf_basic_logger_.reset();
+diff --git a/src/logging/log.h b/src/logging/log.h
+index 1e08b196b48..5dc4a4f0daf 100644
+--- a/src/logging/log.h
++++ b/src/logging/log.h
+@@ -357,7 +357,7 @@ class V8FileLogger : public LogEventListener {
+ 
+   std::atomic<bool> is_logging_;
+   std::unique_ptr<LogFile> log_file_;
+-#if V8_OS_LINUX
++#if V8_OS_LINUX || V8_OS_DARWIN
+   std::unique_ptr<LinuxPerfBasicLogger> perf_basic_logger_;
+   std::unique_ptr<LinuxPerfJitLogger> perf_jit_logger_;
+ #endif
+-- 
+2.39.5 (Apple Git-154)
+
