@@ -5,3 +5,4 @@ cherry-pick-2b4812d502b2.patch
 cherry-pick-91343bb45c78.patch
 cherry-pick-81155a8f3b20.patch
 feat_macos_prof.patch
+hack_force_enable_perf-basic-prof.patch
