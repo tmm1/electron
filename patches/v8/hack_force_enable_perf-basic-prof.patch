@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aman Karmani <aman@tmm1.net>
+Date: Tue, 19 Nov 2024 10:01:27 -0800
+Subject: hack: force enable perf-basic-prof
+
+
+diff --git a/src/flags/flag-definitions.h b/src/flags/flag-definitions.h
+index 1ee45e35ca2c4a7b81d69e40c310f18ffdbe4430..2b01fa13a0ad759e2733ca1c7af101d24f322cda 100644
+--- a/src/flags/flag-definitions.h
++++ b/src/flags/flag-definitions.h
+@@ -2792,6 +2792,7 @@ DEFINE_IMPLICATION(prof, log_code)
+ DEFINE_BOOL(ll_prof, false, "Enable low-level linux profiler.")
+ 
+ #if V8_OS_LINUX || V8_OS_DARWIN
++#define DEFINE_PERF_PROF_TRUE(nam, cmt) DEFINE_BOOL(nam, true, cmt)
+ #define DEFINE_PERF_PROF_BOOL(nam, cmt) DEFINE_BOOL(nam, false, cmt)
+ #define DEFINE_PERF_PROF_IMPLICATION DEFINE_IMPLICATION
+ #else
+@@ -2807,7 +2808,7 @@ DEFINE_BOOL(ll_prof, false, "Enable low-level linux profiler.")
+ #define DEFAULT_PERF_PROF_PATH "."
+ #endif
+ 
+-DEFINE_PERF_PROF_BOOL(perf_basic_prof,
++DEFINE_PERF_PROF_TRUE(perf_basic_prof,
+                       "Enable perf linux profiler (basic support).")
+ DEFINE_NEG_IMPLICATION(perf_basic_prof, compact_code_space)
+ DEFINE_STRING(perf_basic_prof_path, DEFAULT_PERF_BASIC_PROF_PATH,
+@@ -2833,7 +2834,7 @@ DEFINE_NEG_IMPLICATION(perf_prof, compact_code_space)
+ // --perf-prof-unwinding-info is available only on selected architectures.
+ #if V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_X64 || \
+     V8_TARGET_ARCH_S390X || V8_TARGET_ARCH_PPC64
+-DEFINE_PERF_PROF_BOOL(
++DEFINE_PERF_PROF_TRUE(
+     perf_prof_unwinding_info,
+     "Enable unwinding info for perf linux profiler (experimental).")
+ DEFINE_PERF_PROF_IMPLICATION(perf_prof, perf_prof_unwinding_info)
+@@ -2864,7 +2865,7 @@ DEFINE_BOOL(vtune_prof_annotate_wasm, false,
+ 
+ DEFINE_BOOL(win64_unwinding_info, true, "Enable unwinding info for Windows/x64")
+ 
+-DEFINE_BOOL(interpreted_frames_native_stack, false,
++DEFINE_BOOL(interpreted_frames_native_stack, true,
+             "Show interpreted frames on the native stack (useful for external "
+             "profilers).")
+ 
